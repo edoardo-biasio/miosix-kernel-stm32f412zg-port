@@ -69,6 +69,7 @@
 #OPT_BOARD := nrf52840_generic
 #OPT_BOARD := stm32u585ci_generic
 #OPT_BOARD := stm32u535cb_rrc
+#OPT_BOARD := stm32f412zg_discovery
 
 ##
 ## Optimization flags, choose one.
@@ -747,6 +748,12 @@ ifeq ($(OPT_BOARD),stm32u585ci_generic)
 
 endif
 
+##---------------------------------------------------------------------------
+## stm32f412zg_discovery
+##
+
+# No options
+
 ############################################################################
 ## From the options selected above, now fill all the variables needed to  ##
 ## build Miosix. You should modify something here only if you are adding  ##
@@ -878,6 +885,8 @@ else ifeq ($(OPT_BOARD),stm32u535cb_rrc)
     ARCH := cortexM33_stm32u5
 else ifeq ($(OPT_BOARD),nrf52840_generic)
     ARCH := cortexM4_nrf52
+else ifeq ($(OPT_BOARD),stm32f412zg_discovery)
+    ARCH := cortexM4_stm32f4
 else
     $(info Error: no board specified in miosix/config/Makefile.inc)
     $(error Error)
@@ -1824,6 +1833,36 @@ else ifeq ($(ARCH),cortexM4_stm32f4)
         ## board.
         PROG ?= st-flash --connect-under-reset --reset write \
                 $(if $(ROMFS_DIR), image.bin, main.bin) 0x08000000
+        
+    ##-------------------------------------------------------------------------
+    ## BOARD: stm32f412zg_discovery
+    ##
+    else ifeq ($(OPT_BOARD),stm32f412zg_discovery)
+        ## Base directory with header files for this board
+        BOARD_INC := arch/cortexM4_stm32f4/stm32f412zg_discovery
+
+        ## Select linker script
+        LINKER_SCRIPT := $(BOARD_INC)/stm32_1m+256k_rom.ld
+
+        ## Select architecture specific files
+        ## These are the files in arch/<arch name>/<board name>
+        ARCH_SRC :=                                  \
+        $(BOARD_INC)/boot.cpp                        \
+        $(BOARD_INC)/interfaces-impl/bsp.cpp    
+
+        ## Add a #define to allow querying board name
+        CFLAGS_BASE   += -D_BOARD_STM32F412ZGDISCOVERY 
+        CXXFLAGS_BASE += -D_BOARD_STM32F412ZGDISCOVERY
+
+        ## Select programmer command line
+        ## This is the program that is invoked when the user types
+        ## 'make program'
+        ## The command must provide a way to program the board, or print an
+        ## error message saying that 'make program' is not supported for that
+        ## board.
+        PROG ?= st-flash --connect-under-reset --reset write \
+                $(if $(ROMFS_DIR), image.bin, main.bin) 0x08000000
+
 
     ##-------------------------------------------------------------------------
     ## End of board list

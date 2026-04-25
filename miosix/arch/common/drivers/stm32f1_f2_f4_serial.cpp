@@ -193,6 +193,28 @@ static const STM32SerialHW ports[maxPorts] = {
         DMA2_Stream6, DMA2_Stream6_IRQn, STM32SerialDMAHW::Stream6, 5,
         DMA2_Stream1, DMA2_Stream1_IRQn, STM32SerialDMAHW::Stream1, 5 } },
 };
+#elif defined(STM32F412Zx)
+constexpr int maxPorts = 6;
+static const STM32SerialHW ports[maxPorts] = {
+    { USART1, USART1_IRQn, {7}, STM32Bus::APB2, RCC_APB2ENR_USART1EN,
+      { DMA2, STM32Bus::AHB1, RCC_AHB1ENR_DMA2EN,
+        DMA2_Stream7, DMA2_Stream7_IRQn, STM32SerialDMAHW::Stream7, 4,
+        DMA2_Stream5, DMA2_Stream5_IRQn, STM32SerialDMAHW::Stream5, 4 } },
+    { USART2, USART2_IRQn, {7}, STM32Bus::APB1, RCC_APB1ENR_USART2EN,
+      { DMA1, STM32Bus::AHB1, RCC_AHB1ENR_DMA1EN,
+        DMA1_Stream6, DMA1_Stream6_IRQn, STM32SerialDMAHW::Stream6, 4,
+        DMA1_Stream5, DMA1_Stream5_IRQn, STM32SerialDMAHW::Stream5, 4 } },
+    { USART3, USART3_IRQn, {7}, STM32Bus::APB1, RCC_APB1ENR_USART3EN,
+      { DMA1, STM32Bus::AHB1, RCC_AHB1ENR_DMA1EN,
+        DMA1_Stream3, DMA1_Stream3_IRQn, STM32SerialDMAHW::Stream3, 4,
+        DMA1_Stream1, DMA1_Stream1_IRQn, STM32SerialDMAHW::Stream1, 4 } },
+    {0},
+    {0},
+    { USART6, USART6_IRQn, {8}, STM32Bus::APB2, RCC_APB2ENR_USART6EN,
+      { DMA2, STM32Bus::AHB1, RCC_AHB1ENR_DMA2EN,
+        DMA2_Stream6, DMA2_Stream6_IRQn, STM32SerialDMAHW::Stream6, 5,
+        DMA2_Stream1, DMA2_Stream1_IRQn, STM32SerialDMAHW::Stream1, 5 } },
+};
 #elif defined(STM32F427xx) || defined(STM32F429xx) || defined(STM32F469xx) \
    || defined(STM32F479xx)
 constexpr int maxPorts = 8;
