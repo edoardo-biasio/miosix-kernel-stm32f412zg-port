@@ -69,7 +69,6 @@ void IRQbspInit()
     GPIOD->OSPEEDR=0xaaaaaaaa;
     GPIOE->OSPEEDR=0xaaaaaaaa;
     GPIOH->OSPEEDR=0xaaaaaaaa;
-    Gpio<PD, 3>::mode(Mode::INPUT);
 
     sdCardDetect::mode(Mode::INPUT);
     _led::mode(Mode::OUTPUT);
