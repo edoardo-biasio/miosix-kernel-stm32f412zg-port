@@ -83,32 +83,6 @@ using defaultSerialCtsPin = Gpio<PA,0>;
 // using defaultSerialRtsPin = Gpio<PB,14>;
 // using defaultSerialCtsPin = Gpio<PB,13>;
 
-// Aux serial port
-// Uncomment AUX_SERIAL to enable. The device will appear as /dev/auxtty.
-//#define AUX_SERIAL "auxtty"
-// const unsigned int auxSerial=2;
-// const unsigned int auxSerialSpeed=9600;
-// const bool auxSerialFlowctrl=false;
-//Disable DMA for serial 2 because it conflicts with I2S driver in examples
-// const bool auxSerialDma=false;
-// Default aux serial 1 pins (uncomment when using serial 1)
-// Note: on this board, pins PA9-12 are in use by the user USB port, and PB6 is
-// connected to the Cirrus audio chip
-//using auxSerialTxPin = Gpio<PB,6>;
-//using auxSerialRxPin = Gpio<PB,7>;
-//using auxSerialRtsPin = Gpio<PA,12>;
-//using auxSerialCtsPin = Gpio<PA,11>;
-// Default aux serial 2 pins (uncomment when using serial 2)
-// using auxSerialTxPin = Gpio<PA,2>;
-// using auxSerialRxPin = Gpio<PA,3>;
-// using auxSerialRtsPin = Gpio<PA,1>;
-// using auxSerialCtsPin = Gpio<PA,0>;
-// Default aux serial 3 pins (uncomment when using serial 3)
-//using auxSerialTxPin = Gpio<PB,10>;
-//using auxSerialRxPin = Gpio<PB,11>;
-//using auxSerialRtsPin = Gpio<PB,14>;
-//using auxSerialCtsPin = Gpio<PB,13>;
-
 //SD card driver
 static const unsigned char sdVoltage=33; //Board powered @ 3.3V (when not in low power mode)
 //#define SD_ONE_BIT_DATABUS // use 4 bit databus

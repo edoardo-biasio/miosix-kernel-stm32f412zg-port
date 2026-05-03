@@ -50,7 +50,6 @@
 
 namespace miosix {
 
-typedef Gpio<PD,4>  cs43l22reset;
 
 //
 // Initialization
@@ -75,10 +74,7 @@ void IRQbspInit()
     ledOn();
     delayMs(100);
     ledOff();
-    // On stm32f4discovery some of the SDIO pins conflict with the
-    // audio output chip, so keep it permanently reset to avoid issues
-    // cs43l22reset::mode(Mode::OUTPUT);
-    // cs43l22reset::low();
+
     // Initialize default serial
     IRQsetDefaultConsole(
         STM32SerialBase::get<defaultSerialTxPin,defaultSerialRxPin,
