@@ -32,7 +32,7 @@
 #include "kernel/process.h"
 #include "kernel/scheduler/scheduler.h"
 #include "kernel/boot.h"
-#include "config/miosix_settings.h"
+#include "miosix_settings.h"
 #include "interfaces/poweroff.h"
 #include "interfaces_private/cpu.h"
 #include "interfaces/arch_registers.h"
@@ -49,7 +49,7 @@ namespace miosix {
 // Declaration of interrupt handler functions, used to fill the interrupt table
 //
 
-extern char _main_stack_top asm("_main_stack_top"); //defined in the linker script
+extern char _main_stack_top asm("_irq_stack_top"); //defined in the linker script
 void __attribute__((naked)) Reset_Handler();
 void NMI_Handler();
 void HardFault_Handler();
@@ -361,7 +361,7 @@ void IRQunregisterIrq(GlobalIrqLock& lock, unsigned int id,
 bool IRQisIrqRegistered(unsigned int id) noexcept
 {
     if(id>=numInterrupts) return false;
-    return irqForwardingTable[id].handler==unexpectedInterrupt;
+    return irqForwardingTable[id].handler!=unexpectedInterrupt;
 }
 
 //

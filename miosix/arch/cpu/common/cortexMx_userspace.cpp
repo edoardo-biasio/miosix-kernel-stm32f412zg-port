@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2018-2024 by Terraneo Federico                          *
+ *   Copyright (C) 2018-2026 by Terraneo Federico                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
@@ -27,10 +27,14 @@
 
 #include "interfaces_private/userspace.h"
 #include "interfaces/cpu_const.h"
-#include "mpu/cortexMx_mpu.h"
 #include "kernel/error.h"
 #include <cstdio>
 #include <cstring>
+#include <bit>
+//Only include if needed to prevent printing multiple times the no MPU warning
+#if __MPU_PRESENT==1
+#include "cortexMx_mpu.h"
+#endif //__MPU_PRESENT==1
 
 using namespace std;
 
@@ -68,11 +72,11 @@ void initUserThreadCtxsave(unsigned int *ctxsave, unsigned int pc, int argc,
     ctxsave[0]=reinterpret_cast<unsigned int>(stackPtr);              //--> psp
     ctxsave[6]=reinterpret_cast<unsigned int>(gotBase);               //--> r9
     //leaving the content of r4-r8,r10-r11 uninitialized
-#if __FPU_PRESENT==1
+    #if __FPU_PRESENT==1
     //NOTE: only armv7m with fpu has lr in ctxsave
     ctxsave[9]=0xfffffffd; //EXC_RETURN=thread mode, use psp, no floating ops
     //leaving the content of s16-s31 uninitialized
-#endif //__FPU_PRESENT==1
+    #endif //__FPU_PRESENT==1
 }
 
 //
@@ -162,6 +166,30 @@ void FaultData::IRQtryAddProgramCounter(unsigned int *userCtxsave,
 // class MPUConfiguration
 //
 
+/**
+ * \internal
+ * Decode the boundaries of an MPU region for a given CPU
+ * \param reg0 First register encoding the region information (RBAR)
+ * \param reg1 Second register encoding the region information (RASR or RLAR)
+ * \return a tuple with the start and end address
+ */
+static tuple<size_t, size_t> decodeMpuRegion(unsigned int reg0, unsigned int reg1)
+{
+    #if __MPU_PRESENT==1
+    #if __CORTEX_M == 33
+    size_t regionStart=reg0 & (~0x1f);
+    size_t regionEnd=(reg1 | 0x1f)+1;
+    #else
+    size_t regionStart=reg0 & (~0x1f);
+    size_t regionEnd=regionStart+(1<<(((reg1>>1) & 31)+1));
+    #endif
+    #else //__MPU_PRESENT==1
+    size_t regionStart=reg0;
+    size_t regionEnd=reg1;
+    #endif //__MPU_PRESENT==1
+    return {regionStart,regionEnd};
+}
+
 MPUConfiguration::MPUConfiguration(const unsigned int *elfBase, unsigned int elfSize,
         const unsigned int *imageBase, unsigned int imageSize)
 {
@@ -177,21 +205,23 @@ MPUConfiguration::MPUConfiguration(const unsigned int *elfBase, unsigned int elf
     // causes the boot to fail.
     // For this reason, all regions are marked as not shareable
     #if __CORTEX_M == 33
+    //NOTE: Unlike previous Cortex CPUs it's no longer possible to mark a region
+    //as RW for privileged but RO for non-privileged
     const unsigned int MPU_RLAR_PXN_Msk=1<<4; //This bit is missing in the ARM .h
-    regValues[0]=6; // RNR
-    regValues[1]=(reinterpret_cast<unsigned int>(elfBase) & (~0x1f))
+    // regValues indexes 0/1 are for RNR number 6
+    regValues[0]=(reinterpret_cast<unsigned int>(elfBase) & (~0x1f))
                 | 3<<MPU_RBAR_AP_Pos; //Privileged: RO, unprivileged: RO
-    regValues[2]=((reinterpret_cast<unsigned int>(elfBase)+elfSize-1) & (~0x1f))
+    regValues[1]=((reinterpret_cast<unsigned int>(elfBase)+elfSize-1) & (~0x1f))
                 | MPU_RLAR_PXN_Msk    //Not executable from the privileged side
-                | 1<<MPU_RLAR_AttrIndx_Pos // TODO SRAM, defined in cortexMx_mpu.cpp
+                | 0<<MPU_RLAR_AttrIndx_Pos //NOTE: regions in cortexMx_mpu.cpp
                 | 1; //Enable bit
-    regValues[3]=7; // RNR
-    regValues[4]=(reinterpret_cast<unsigned int>(imageBase) & (~0x1f))
+    // regValues indexes 2/3 are for RNR number 7
+    regValues[2]=(reinterpret_cast<unsigned int>(imageBase) & (~0x1f))
                 | 1<<MPU_RBAR_AP_Pos //Privileged: RW, unprivileged: RW
                 | MPU_RBAR_XN_Msk;   //Not executable
-    regValues[5]=((reinterpret_cast<unsigned int>(imageBase)+imageSize-1) & (~0x1f))
+    regValues[3]=((reinterpret_cast<unsigned int>(imageBase)+imageSize-1) & (~0x1f))
                 | MPU_RLAR_PXN_Msk    //Not executable from the privileged side
-                | 1<<MPU_RLAR_AttrIndx_Pos // SRAM, defined in cortexMx_mpu.cpp
+                | 0<<MPU_RLAR_AttrIndx_Pos //NOTE: regions in cortexMx_mpu.cpp
                 | 1; //Enable bit
     #else // __CORTEX_M == 33
     regValues[0]=(reinterpret_cast<unsigned int>(elfBase) & (~0x1f))
@@ -209,59 +239,48 @@ MPUConfiguration::MPUConfiguration(const unsigned int *elfBase, unsigned int elf
                 | sizeToMpu(imageSize)<<1;
     #endif
     #else //__MPU_PRESENT==1
-    #warning architecture lacks MPU, memory protection for processes unsupported
+    #warning Architecture does not provide an MPU, userspace memory protection will not be enforced
     //Although we have no MPU, store enough information to still enable checking
     //syscall parameters in withinForReading()/withinForWriting()
-    regValues[0]=(reinterpret_cast<unsigned int>(elfBase) & (~0x1f));
-    regValues[2]=(reinterpret_cast<unsigned int>(imageBase) & (~0x1f));
-    regValues[1]=sizeToMpu(elfSize)<<1;
-    regValues[3]=sizeToMpu(imageSize)<<1;
+    regValues[0]=reinterpret_cast<unsigned int>(elfBase);
+    regValues[1]=reinterpret_cast<unsigned int>(elfBase)+elfSize;
+    regValues[2]=reinterpret_cast<unsigned int>(imageBase);
+    regValues[3]=reinterpret_cast<unsigned int>(imageBase)+imageSize;
     #endif //__MPU_PRESENT==1
 }
 
 void MPUConfiguration::dumpConfiguration()
 {
-    #if __MPU_PRESENT==1
-    #if __CORTEX_M == 33
     for(int i=0;i<2;i++)
     {
-        unsigned int rnr=regValues[3*i];
-        unsigned int rbar=regValues[3*i+1];
-        unsigned int base=rbar & ~0x1f;
-        unsigned int end=regValues[3*i+2] & ~0x1f;
-        char w=rbar & (0b10<<MPU_RBAR_AP_Pos) ? '-' : 'w';
-        char x=rbar & MPU_RBAR_XN_Msk ? '-' : 'x';
-        iprintf("* MPU region %d 0x%08x-0x%08x r%c%c\n",rnr,base,end,w,x);
-    }
-    #else
-    for(int i=0;i<2;i++)
-    {
-        unsigned int base=regValues[2*i] & (~0x1f);
-        unsigned int end=base+(1<<(((regValues[2*i+1]>>1) & 31)+1));
+        size_t base, end;
+        tie(base,end)=decodeMpuRegion(regValues[2*i],regValues[2*i+1]);
+        #if __MPU_PRESENT==1
+        #if __CORTEX_M == 33
+        char w=regValues[2*i] & (0b10<<MPU_RBAR_AP_Pos) ? '-' : 'w';
+        char x=regValues[2*i] & MPU_RBAR_XN_Msk ? '-' : 'x';
+        #else
         char w=regValues[2*i+1] & (1<<MPU_RASR_AP_Pos) ? 'w' : '-';
         char x=regValues[2*i+1] & MPU_RASR_XN_Msk ? '-' : 'x';
+        #endif
         iprintf("* MPU region %d 0x%08x-0x%08x r%c%c\n",i+6,base,end,w,x);
+        #else //__MPU_PRESENT==1
+        iprintf("* Memory region %d 0x%08x-0x%08x rwx\n",i,base,end);
+        #endif //__MPU_PRESENT==1
     }
-    #endif
-    #else //__MPU_PRESENT==1
-    iprintf("* Architecture lacks MPU\n");
-    for(int i=0;i<2;i++)
-    {
-        unsigned int base=regValues[2*i] & (~0x1f);
-        unsigned int end=base+(1<<(((regValues[2*i+1]>>1) & 31)+1));
-        iprintf("* MPU region %d 0x%08x-0x%08x rwx\n",i+6,base,end);
-    }
-    #endif //__MPU_PRESENT==1
 }
 
-unsigned int MPUConfiguration::roundSizeForMPU(unsigned int size)
-{
-    return 1<<(sizeToMpu(size)+1);
-}
-
-pair<const unsigned int*, unsigned int> MPUConfiguration::roundRegionForMPU(
+tuple<const unsigned int*, unsigned int> MPUConfiguration::roundRegionForMPU(
     const unsigned int *ptr, unsigned int size)
 {
+    unsigned int p=reinterpret_cast<unsigned int>(ptr);
+    #if __CORTEX_M == 33
+    //ARMv8+ has no power of 2 size constraint, just align pointer to 32 byte
+    //and make size a multiple of 32 bytes
+    unsigned int ap=p & (~0x1f);
+    size+=p-ap;
+    return {reinterpret_cast<const unsigned int*>(ap), (size+0x1f) & (~0x1f)};
+    #else
     constexpr unsigned int maxSize=0x80000000;
     //NOTE: worst case is p=2147483632 size=32, a memory block in the middle of
     //the 2GB mark. To meet the constraint of returning a pointer aligned to its
@@ -276,50 +295,48 @@ pair<const unsigned int*, unsigned int> MPUConfiguration::roundRegionForMPU(
     //flash memory, and the memory is always aligned to its size, so the maximum
     //aligned block this algorithm would return is just the entire flash memory,
     //whose size is far less than 2GB in modern microcontrollers.
-    unsigned int p=reinterpret_cast<unsigned int>(ptr);
-    unsigned int x=roundSizeForMPU(size);
+    unsigned int x=std::bit_ceil(size);
     for(;;)
     {
         if(x>=maxSize) errorHandler(Error::UNEXPECTED);
         unsigned int ap=p & (~(x-1));
         unsigned int addsz=p-ap;
-        unsigned int y=roundSizeForMPU(size+addsz);
+        unsigned int y=std::bit_ceil(size+addsz);
         //iprintf("ap=%u addsz=%u x=%u y=%u\n",ap,addsz,x,y);
         if(y==x) return {reinterpret_cast<const unsigned int*>(ap),x};
         x=y;
     }
+    #endif
 }
 
 bool MPUConfiguration::withinForReading(const void *ptr, size_t size) const
 {
-    size_t codeStart=regValues[0] & (~0x1f);
-    size_t codeEnd=codeStart+(1<<(((regValues[1]>>1) & 31)+1));
-    size_t dataStart=regValues[2] & (~0x1f);
-    size_t dataEnd=dataStart+(1<<(((regValues[3]>>1) & 31)+1));
     size_t base=reinterpret_cast<size_t>(ptr);
+    size_t codeStart,codeEnd,dataStart,dataEnd;
+    tie(codeStart,codeEnd)=decodeMpuRegion(regValues[0],regValues[1]);
+    tie(dataStart,dataEnd)=decodeMpuRegion(regValues[2],regValues[3]);
     //The last check is to prevent a wraparound to be considered valid
-    return (   (base>=codeStart && base+size<codeEnd)
-            || (base>=dataStart && base+size<dataEnd)) && base+size>=base;
+    return (   (base>=codeStart && base+size<=codeEnd)
+            || (base>=dataStart && base+size<=dataEnd)) && base+size>=base;
 }
 
 bool MPUConfiguration::withinForWriting(const void *ptr, size_t size) const
 {
     //Must be callable also with interrupts disabled,
     //used by FaultData::IRQtryAddProgramCounter()
-    size_t dataStart=regValues[2] & (~0x1f);
-    size_t dataEnd=dataStart+(1<<(((regValues[3]>>1) & 31)+1));
     size_t base=reinterpret_cast<size_t>(ptr);
+    size_t dataStart,dataEnd;
+    tie(dataStart,dataEnd)=decodeMpuRegion(regValues[2],regValues[3]);
     //The last check is to prevent a wraparound to be considered valid
-    return base>=dataStart && base+size<dataEnd && base+size>=base;
+    return base>=dataStart && base+size<=dataEnd && base+size>=base;
 }
 
 bool MPUConfiguration::withinForReading(const char* str) const
 {
-    size_t codeStart=regValues[0] & (~0x1f);
-    size_t codeEnd=codeStart+(1<<(((regValues[1]>>1) & 31)+1));
-    size_t dataStart=regValues[2] & (~0x1f);
-    size_t dataEnd=dataStart+(1<<(((regValues[3]>>1) & 31)+1));
     size_t base=reinterpret_cast<size_t>(str);
+    size_t codeStart,codeEnd,dataStart,dataEnd;
+    tie(codeStart,codeEnd)=decodeMpuRegion(regValues[0],regValues[1]);
+    tie(dataStart,dataEnd)=decodeMpuRegion(regValues[2],regValues[3]);
     if((base>=codeStart) && (base<codeEnd))
         return strnlen(str,codeEnd-base)<codeEnd-base;
     if((base>=dataStart) && (base<dataEnd))

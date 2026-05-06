@@ -27,7 +27,9 @@
 
 #pragma once
 
-#include "config/miosix_settings.h"
+//TODO: despite being a private interface, it is included by kernel/lock.h
+
+#include "miosix_settings.h"
 
 /**
  * \addtogroup Interfaces

@@ -24,22 +24,30 @@
 # along with this program; if not, see <http://www.gnu.org/licenses/>
 
 include(AddProgramTarget)
+include(SetDefaultProgramTarget)
 
 # Function to link the Miosix libraries to a target and register the build command
 #
-#   miosix_link_target(<target>)
+#   miosix_link_target(<target> [PROGRAM_DEFAULT] [NO_SIZE])
 #
 # What it does:
 # - Links the Miosix libraries to the target
 # - Tells the linker to generate the map file
 # - Registers custom targets to create the hex and bin files (${TARGET}_bin and ${TARGET}_hex)
 # - Registers a custom target to flash the program to the board (${TARGET}_program)
+#
+# If PROGRAM_DEFAULT is also passed to it, it also defines the "program" target
+# which is an alias for ${TARGET}_program.
+# By default, the size of the target .elf file is also printed at the end of
+# the link process, unless if NO_SIZE is specified.
 function(miosix_link_target TARGET)
+    cmake_parse_arguments(PARSE_ARGV 0 LINK_TGT "PROGRAM_DEFAULT;NO_SIZE" "" "")
+
     if (NOT TARGET miosix)
         message(FATAL_ERROR "The board you selected is not supported")
     endif()
 
-    # Linker script and linking options are eredited from miosix libraries
+    # Linker script and linking options are inherited from miosix libraries
 
     # Link libraries
     target_link_libraries(${TARGET} PRIVATE
@@ -52,6 +60,7 @@ function(miosix_link_target TARGET)
     # Add a post build command to create the hex file to flash on the board
     add_custom_command(
         OUTPUT ${TARGET}.hex
+        DEPENDS ${TARGET}
         COMMAND ${CMAKE_OBJCOPY} -O ihex $<TARGET_FILE:${TARGET}> ${TARGET}.hex
         COMMENT "Creating ${TARGET}.hex"
         VERBATIM
@@ -59,12 +68,28 @@ function(miosix_link_target TARGET)
     add_custom_target(${TARGET}_hex ALL DEPENDS ${TARGET}.hex)
     add_custom_command(
         OUTPUT ${TARGET}.bin
+        DEPENDS ${TARGET}
         COMMAND ${CMAKE_OBJCOPY} -O binary $<TARGET_FILE:${TARGET}> ${TARGET}.bin
         COMMENT "Creating ${TARGET}.bin"
         VERBATIM
     )
     add_custom_target(${TARGET}_bin ALL DEPENDS ${TARGET}.bin)
 
+    # Print size of .elf
+    get_target_property(MIOSIX_SOURCE_DIR miosix SOURCE_DIR)
+    if(NOT LINK_TGT_NO_SIZE)
+        add_custom_command(
+            TARGET ${TARGET}
+            POST_BUILD
+            COMMAND perl ${MIOSIX_SOURCE_DIR}/tools/miosix_size.pl $<TARGET_FILE:${TARGET}>
+            COMMENT "Computing $<TARGET_FILE_NAME:${TARGET}> size"
+            VERBATIM
+        )
+    endif()
+
     # Generate custom build command to flash the target
-    miosix_add_program_target(${TARGET})
+    miosix_add_program_target(${TARGET}_program ${TARGET})
+    if(LINK_TGT_PROGRAM_DEFAULT)
+        miosix_set_default_program_target(${TARGET}_program)
+    endif()
 endfunction()

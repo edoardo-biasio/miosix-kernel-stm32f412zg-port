@@ -83,7 +83,7 @@ namespace miosix {
 /// \def WITH_FILESYSTEM
 /// Allows to enable/disable filesystem support to save code size
 /// By default it is defined (filesystem support is enabled)
-#define WITH_FILESYSTEM
+//#define WITH_FILESYSTEM
 
 // The following options make sense only when filesystem is enabled, so they are
 // always left undefined otherwise
@@ -126,7 +126,6 @@ constexpr unsigned int FATFS_EXTEND_BUFFER=512;
 /// filesystem is synced so that a power failure happens data is not lost
 /// (unless power failure happens exactly between the write and the sync)
 /// Unfortunately write latency and throughput becomes twice as worse
-/// By default it is defined (slow but safe)
 //#define SYNC_AFTER_WRITE
 
 /// Maximum number of files a single process (or the kernel) can open. This
@@ -181,18 +180,26 @@ enum class ExtraChecks { None, Application, Kernel };
 constexpr auto extraChecks=ExtraChecks::None;
 
 /// \def WITH_SLEEP
-/// Enable sleep support. If enabled, the idle thread will stop the CPU whenever
-/// no ready thread exists to save power.
+/// Enable power saving sleep support. If enabled, the idle thread will use the
+/// architecturally provided machine instruction to stop the CPU whenever no
+/// ready thread exists, to save power.
+/// Disabling this option <b>does not</b> disable the possibility for threads
+/// to sleep. Application code will not notice the difference with or without
+/// this option. This option will only change the CPU energy consumption when
+/// threads are sleeping.
 /// In general, you should keep this option enabled, the only reason to disable
 /// this option is that on some architectures debuggers lose communication with
-/// the device if it enters sleep mode, so to use debugging it is necessary to
-/// disable sleep support. For this reason, the option used to be called JTAG_DISABLE_SLEEP
+/// the device if it enters sleep mode. On these architectures, you can disable
+/// this option during debug builds and enable it again in release builds. For
+/// this reason, the option used to be called JTAG_DISABLE_SLEEP
 #define WITH_SLEEP
 
 /// \def WITH_DEEP_SLEEP 
-/// Adds interfaces and required variables to support entering deep sleep and
-/// thus turning off also peripherals when possible. Saves much more energy but
-/// requires device drivers to support this option.
+/// Adds interfaces and required variables to allow the idle thread to
+/// autonomously enter the hardware-provided deep sleep state and thus achieve
+/// greater energy saving by turning off also clocks and peripherals when
+/// possible. Requires device drivers to support this option. Not all chips and
+/// boards support this.
 //#define WITH_DEEP_SLEEP
 
 #if defined(WITH_DEEP_SLEEP) && !defined(WITH_SLEEP)

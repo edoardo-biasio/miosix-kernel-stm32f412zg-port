@@ -27,7 +27,7 @@
 
 #pragma once
 
-#include "config/miosix_settings.h"
+#include "miosix_settings.h"
 #include "interfaces/arch_registers.h"
 #include "interfaces/cpu_const.h"
 #include <cassert>
@@ -138,12 +138,12 @@ inline void MPUConfiguration::IRQenable()
 
     #if __CORTEX_M == 33
     // ARMv8-M
-    MPU->RNR =regValues[0];
-    MPU->RBAR=regValues[1];
-    MPU->RLAR=regValues[2];
-    MPU->RNR =regValues[3];
-    MPU->RBAR=regValues[4];
-    MPU->RLAR=regValues[5];
+    MPU->RNR = 6; // regValues indexes 0/1 are for RNR number 6
+    MPU->RBAR=regValues[0];
+    MPU->RLAR=regValues[1];
+    MPU->RNR = 7; // regValues indexes 2/3 are for RNR number 7
+    MPU->RBAR=regValues[2];
+    MPU->RLAR=regValues[3];
     #else
     // ARMv7-M
     MPU->RBAR=regValues[0];
@@ -162,6 +162,20 @@ inline void MPUConfiguration::IRQenable()
 inline void MPUConfiguration::IRQdisable()
 {
     #if __MPU_PRESENT==1
+
+    #if __CORTEX_M == 33
+    // MPU region 6 is the process code region. Since the process code can be
+    // run from the process pool (if the corresonding program is not in a XIP
+    // filesystem), region 6 can point to RAM inside the process pool.
+    // In previous Cortex CPUs it was possible to mark a region as RW for
+    // privileged but RO for non-privileged, so we could leave userspace regions
+    // always enabled as they won't interfere with the kernel's ability to write
+    // in the process pool. This is no longer the case for Cortex M33, thus we
+    // need to disable region 6 when context switching towards the kernel.
+    MPU->RNR = 6;
+    MPU->RLAR= 0; //EN=0, disable region
+    #endif
+
     // Clear bit 0 of CONTROL register to switch thread mode to privileged. When
     // we'll return from the interrupt the MPU will check the access permissions
     // for privileged processes which includes the default memory map as we set

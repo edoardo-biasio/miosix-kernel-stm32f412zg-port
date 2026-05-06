@@ -56,14 +56,14 @@ util/lcd44780.cpp
 ## Add the architecture dependand sources to the list of files to build.
 ## ARCH_SRC will contain different source files depending on which
 ## architecture/board is selected in config/Makefile.inc
-SRC += $(ARCH_SRC)
+SRC += $(BOARD_SRC) $(CHIP_SRC)
 
 CFLAGS   += -DCOMPILING_MIOSIX
 CXXFLAGS += -DCOMPILING_MIOSIX
 
 all: $(OBJ)
 	$(ECHO) "[PERL] Checking global objects"
-	$(Q)perl _tools/kernel_global_objects.pl $(OBJ)
+	$(Q)perl $(TOOLS_DIR)/kernel_global_objects.pl $(OBJ)
 	$(ECHO) "[AR  ] libmiosix.a"
 	$(Q)$(AR) rcs libmiosix.a $(OBJ)
 

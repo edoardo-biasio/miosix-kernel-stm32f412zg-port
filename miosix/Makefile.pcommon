@@ -12,14 +12,21 @@ ifeq ($(CONFPATH),)
     $(error Error)
 endif
 
-include $(CONFPATH)/config/Makefile.inc
+include $(KPATH)/arch/Makefile.inc
 
-AFLAGS   ?= $(CPU) -c
-CFLAGS   ?= -MMD -MP $(CPU) -ffunction-sections -Wall -Werror=return-type \
-            -D_DEFAULT_SOURCE=1 $(OPT_OPTIMIZATION) $(INCLUDE_DIRS) -g -c
-CXXFLAGS ?= -std=c++14 $(PROC_OPT_EXCEPT) $(CFLAGS)
-LFLAGS   ?= $(CPU) -Wl,--gc-sections
-LINK_LIBS ?= $(LIBS)
+AFLAGS   := $(CPU_FLAGS) $(PROC_AFLAGS_BASE) -c
+CFLAGS   := -D_DEFAULT_SOURCE=1 $(CPU_FLAGS) $(PROC_OPT_OPTIMIZATION) \
+            $(PROC_OPT_EXCEPT) $(PROC_CFLAGS_BASE) $(INCLUDE_DIRS)    \
+            -MMD -MP -c
+CXXFLAGS := -D_DEFAULT_SOURCE=1 $(CPU_FLAGS) $(PROC_OPT_OPTIMIZATION) \
+            $(PROC_OPT_EXCEPT)  $(PROC_CXXFLAGS_BASE) $(INCLUDE_DIRS) \
+            -MMD -MP -c
+LFLAGS   := $(CPU_FLAGS) $(PROC_LFLAGS_BASE)
+LINK_LIBS := $(LIBS)
+
+#TODO: this should be in arch/Makefile.inc but $(TOOLS_DIR) isn't defined there
+TOOLS_DIR := $(KPATH)/tools
+SZ := perl $(TOOLS_DIR)/miosix_size.pl --prefix=$(PREFIX)
 
 OBJ ?= $(addsuffix .o, $(basename $(SRC)))
 

@@ -30,9 +30,11 @@
 // Low level hardware functionalities
 #include "interfaces/bsp.h"
 #include "interfaces/poweroff.h"
+#include "interfaces/cache.h"
 #include "interfaces_private/bsp_private.h"
 #include "interfaces_private/os_timer.h"
 #include "interfaces_private/sleep.h"
+#include "interfaces_private/mpu.h"
 // Miosix kernel
 #include "thread.h"
 #include "filesystem/file_access.h"
@@ -40,7 +42,7 @@
 #include "logging.h"
 #include "pthread_private.h"
 // settings for miosix
-#include "config/miosix_settings.h"
+#include "miosix_settings.h"
 #include "util/util.h"
 #include "util/version.h"
 
@@ -78,12 +80,26 @@ void IRQkernelBootEntryPoint()
     #ifndef __NO_EXCEPTIONS
     try {
     #endif //__NO_EXCEPTIONS
+
         //These are defined in the linker script
         extern unsigned char _etext asm("_etext");
         extern unsigned char _data asm("_data");
         extern unsigned char _edata asm("_edata");
         extern unsigned char _bss_start asm("_bss_start");
         extern unsigned char _bss_end asm("_bss_end");
+        extern unsigned char _xram_start asm("_xram_start");
+        extern unsigned char _xram_size asm("_xram_size");
+
+        const unsigned char *xramBase=&_xram_start;
+        //NOTE: volatile is important, otherwise compiler for some reason
+        //assumes _xram_size can't be nullptr, so xramSize cannot be 0
+        volatile unsigned int xramSize=reinterpret_cast<unsigned int>(&_xram_size);
+
+        // Enable MPU on architectures that support it
+        IRQenableMPU(xramBase,xramSize);
+        // Enable cache after the MPU since in Cortex-M CPUs the MPU driver
+        // also configures cacheability
+        IRQenableCache();
 
         //Initialize .data section, clear .bss section
         unsigned char *etext=&_etext;
@@ -138,11 +154,29 @@ void *mainLoader(void *argv)
     extern unsigned long __init_array_end asm("__init_array_end");
     extern unsigned long _ctor_start asm("_ctor_start");
     extern unsigned long _ctor_end asm("_ctor_end");
+
     callConstructors(&__preinit_array_start, &__preinit_array_end);
     callConstructors(&__init_array_start, &__init_array_end);
     callConstructors(&_ctor_start, &_ctor_end);
     
     bootlog("OS Timer freq = %d Hz\n", osTimerGetFrequency());
+    #ifdef __ENABLE_XRAM
+    extern unsigned char _xram_start asm("_xram_start");
+    extern unsigned char _xram_size asm("_xram_size");
+    const unsigned char *xramBase=&_xram_start;
+    //NOTE: volatile is important, otherwise compiler for some reason assumes
+    //_xram_size can't be nullptr, so xramSize cannot be 0
+    volatile unsigned int xramSize=reinterpret_cast<unsigned int>(&_xram_size);
+    bootlog("XRAM @ %p, size %u\n",xramBase,xramSize);
+    #endif //__ENABLE_XRAM
+    #ifdef WITH_PROCESSES
+    extern unsigned char _process_pool_start asm("_process_pool_start");
+    extern unsigned char _process_pool_end asm("_process_pool_end");
+    const unsigned char *poolBase=&_process_pool_start;
+    unsigned int poolSize=(&_process_pool_end)-(&_process_pool_start);
+    if(poolSize) bootlog("Process pool @ %p, size %u\n",poolBase,poolSize);
+    else bootlog("Error: kernel compiled with processes but missing process pool\n");
+    #endif //WITH_PROCESSES
     bootlog("Available heap %d out of %d Bytes\n",
             MemoryProfiling::getCurrentFreeHeap(),
             MemoryProfiling::getHeapSize());

@@ -26,12 +26,7 @@
 include(ExternalProject)
 include(AddProgramTarget)
 include(CreateProcessesDir)
-
-# Create a target that builds the buildromfs tool
-ExternalProject_Add(buildromfs
-    SOURCE_DIR ${MIOSIX_KPATH}/_tools/filesystems
-    INSTALL_COMMAND "" # Skip install
-)
+include(SetDefaultProgramTarget)
 
 # Create a target that builds the romfs image and combines it the kernel into a single binary image
 #
@@ -47,8 +42,8 @@ ExternalProject_Add(buildromfs
 # - Creates a romfs image with of the directory <dir_name>
 # - Combines the kernel and the romfs image into a single binary image
 # - Registers a custom target (named <dir_name>) with to run the above steps
-function(miosix_add_romfs_image)
-    cmake_parse_arguments(ROMFS "" "IMAGE_NAME;KERNEL;DIR_NAME" "PROCESSES" ${ARGN})
+function(miosix_add_romfs_image ROMFS_IMAGE_NAME)
+    cmake_parse_arguments(PARSE_ARGV 0 ROMFS "PROGRAM_DEFAULT" "KERNEL;DIR_NAME" "PROCESSES")
 
     # If the user did not provide a directory name, use "bin" as default
     if(NOT ROMFS_DIR_NAME)
@@ -65,16 +60,17 @@ function(miosix_add_romfs_image)
     # Create the romfs image with the given processes
     add_custom_command(
         OUTPUT ${ROMFS_IMAGE_NAME}-romfs.bin
-        DEPENDS ${MIOSIX_${ROMFS_DIR_NAME}_FILES} buildromfs
-        COMMAND ${MIOSIX_KPATH}/_tools/filesystems/buildromfs ${ROMFS_IMAGE_NAME}-romfs.bin --from-directory ${ROMFS_DIR_NAME}
+        DEPENDS "${MIOSIX_PROCESSES_FILES}"
+        COMMAND mx-buildromfs ${ROMFS_IMAGE_NAME}-romfs.bin --from-directory ${ROMFS_DIR_NAME}
         COMMENT "Building ${ROMFS_IMAGE_NAME}-romfs.bin"
     )
 
-    # Combin kernel and romfs images
+    # Combine kernel and romfs images
+    get_target_property(MIOSIX_SOURCE_DIR miosix SOURCE_DIR)
     add_custom_command(
         OUTPUT ${ROMFS_IMAGE_NAME}.bin
         DEPENDS ${ROMFS_KERNEL}.bin ${ROMFS_IMAGE_NAME}-romfs.bin
-        COMMAND perl ${MIOSIX_KPATH}/_tools/filesystems/mkimage.pl ${ROMFS_IMAGE_NAME}.bin ${ROMFS_KERNEL}.bin ${ROMFS_IMAGE_NAME}-romfs.bin
+        COMMAND perl ${MIOSIX_SOURCE_DIR}/tools/mkimage.pl ${ROMFS_IMAGE_NAME}.bin ${ROMFS_KERNEL}.bin ${ROMFS_IMAGE_NAME}-romfs.bin
         COMMENT "Combining ${ROMFS_KERNEL}.bin and ${ROMFS_IMAGE_NAME}-romfs.bin into ${ROMFS_IMAGE_NAME}.bin"
     )
 
@@ -82,5 +78,8 @@ function(miosix_add_romfs_image)
     add_custom_target(${ROMFS_IMAGE_NAME} ALL DEPENDS ${PROJECT_BINARY_DIR}/${ROMFS_IMAGE_NAME}.bin)
 
     # And a target to flash the image
-    miosix_add_program_target(${ROMFS_IMAGE_NAME} DEPENDS ${ROMFS_IMAGE_NAME})
+    miosix_add_program_target(${ROMFS_IMAGE_NAME}_program ${ROMFS_IMAGE_NAME} DEPENDS ${ROMFS_IMAGE_NAME})
+    if(ROMFS_PROGRAM_DEFAULT)
+        miosix_set_default_program_target(${ROMFS_IMAGE_NAME}_program)
+    endif()
 endfunction()
