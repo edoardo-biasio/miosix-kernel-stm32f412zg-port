@@ -57,7 +57,7 @@ constexpr unsigned int hseFrequency=8000000;
 // Note: at 100Mhz SDIO and RNG run at the wrong speed and USB will not work
 // because the PLL will run at 40MHz instead of 48MHz due to hardware
 // limitations 
-constexpr unsigned int sysclkFrequency=100000000;
+constexpr unsigned int cpuFrequency=100000000;
 
 /// Serial port
 /// Serial ports 1 to 6 are available
@@ -66,8 +66,8 @@ const unsigned int defaultSerialSpeed=115200;
 const bool defaultSerialFlowctrl=false;
 const bool defaultSerialDma=true;
 // Default serial 1 pins (uncomment when using serial 1)
-// Note: on this board, pins PA9-12 are in use by the user USB port, and PB6 is
-// connected to the Cirrus audio chip
+// Note: on this board, pins PA9-12 are in use by the user USB port, and PB6/PB7 are
+// connected to the audio chip
 //using defaultSerialTxPin = Gpio<PB,6>;
 //using defaultSerialRxPin = Gpio<PB,7>;
 //using defaultSerialRtsPin = Gpio<PA,12>;

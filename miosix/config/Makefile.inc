@@ -65,7 +65,7 @@
 #OPT_BOARD := stm32l476rg_nucleo
 #OPT_BOARD := stm32l4r9zi_sensortile
 #OPT_BOARD := stm32u535cb_rrc
-#OPT_BOARD := stm32f412zg_discovery
+OPT_BOARD := stm32f412zg_discovery
 #OPT_BOARD := stm32u585ci_generic
 
 ##
