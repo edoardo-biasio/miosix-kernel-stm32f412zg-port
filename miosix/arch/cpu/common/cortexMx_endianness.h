@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2026 by Terraneo Federico                               *
+ *   Copyright (C) 2011-2024 by Terraneo Federico                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
@@ -27,14 +27,60 @@
 
 #pragma once
 
-#warning Architecture does not provide an MPU, kernel-level W^X will not be enforced
+#ifdef __cplusplus
+#define __MIOSIX_INLINE inline
+#else //__cplusplus
+#define __MIOSIX_INLINE static inline
+#endif //__cplusplus
 
-namespace miosix {
+__MIOSIX_INLINE unsigned short swapBytes16(unsigned short x)
+{
+    //It's kind of a shame that GCC can't automatically make use of
+    //instructions like rev and rev16 to do byte swapping.
+    //Moreover, while for 32 and 64 bit integers it has builtins, for 16 bit
+    //we're forced to use inline asm.
+    #ifdef __GNUC__
+    if(!__builtin_constant_p(x))
+    {
+        unsigned short y;
+        asm("rev16 %0, %1":"=r"(y):"r"(x));
+        return y;
+    } else {
+        //It gets worse: if value is constant inlining assembler disables
+        //contant folding, wtf...
+        return (x>>8) | (x<<8);
+    }
+    #else //__GNUC__
+    return (x>>8) | (x<<8);
+    #endif //__GNUC__
+}
 
-/**
- * \internal
- * No MPU in this architecture, do nothing
- */
-inline void IRQenableMPU() {}
+__MIOSIX_INLINE unsigned int swapBytes32(unsigned int x)
+{
+    #ifdef __GNUC__
+    return __builtin_bswap32(x);
+    #else //__GNUC__
+    return ( x>>24)               |
+           ((x<< 8) & 0x00ff0000) |
+           ((x>> 8) & 0x0000ff00) |
+           ( x<<24);
+    #endif //__GNUC__
+}
 
-} //namespace miosix
+__MIOSIX_INLINE unsigned long long swapBytes64(unsigned long long x)
+{
+    #ifdef __GNUC__
+    return __builtin_bswap64(x);
+    #else //__GNUC__
+    return ( x>>56)                          |
+           ((x<<40) & 0x00ff000000000000ull) |
+           ((x<<24) & 0x0000ff0000000000ull) |
+           ((x<< 8) & 0x000000ff00000000ull) |
+           ((x>> 8) & 0x00000000ff000000ull) |
+           ((x>>24) & 0x0000000000ff0000ull) |
+           ((x>>40) & 0x000000000000ff00ull) |
+           ( x<<56);
+    #endif //__GNUC__
+}
+
+#undef __MIOSIX_INLINE

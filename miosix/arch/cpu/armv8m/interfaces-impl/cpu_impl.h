@@ -29,25 +29,34 @@
 
 #include "interfaces/arch_registers.h"
 
+#ifndef __FPU_PRESENT
+#define __FPU_PRESENT 0 //__FPU_PRESENT undefined means no FPU
+#endif
+
 /**
  * \addtogroup Interfaces
  * \{
  */
 
+#if __FPU_PRESENT==1
+
 /*
  * In this architecture, registers are saved in the following order:
- * *ctxsave+32 --> r11
- * *ctxsave+28 --> r10
- * *ctxsave+24 --> r9
- * *ctxsave+20 --> r8
- * *ctxsave+16 --> r7
- * *ctxsave+12 --> r6
- * *ctxsave+8  --> r5
- * *ctxsave+4  --> r4
- * *ctxsave+0  --> psp
+ * *ctxsave+104 --> psplim
+ * *ctxsave+100 --> s31
+ * ...
+ * *ctxsave+40  --> s16
+ * *ctxsave+36  --> lr (contains EXC_RETURN whose bit #4 tells if fpu is used)
+ * *ctxsave+32  --> r11
+ * *ctxsave+28  --> r10
+ * *ctxsave+24  --> r9
+ * *ctxsave+20  --> r8
+ * *ctxsave+16  --> r7
+ * *ctxsave+12  --> r6
+ * *ctxsave+8   --> r5
+ * *ctxsave+4   --> r4
+ * *ctxsave+0   --> psp
  */
-
-#ifndef WITH_SMP
 
 /**
  * \internal
@@ -70,19 +79,16 @@
  * committed. This is important to ensure the state of the thread stays
  * consistent if it's moved to another core.
  */
-#define saveContext()                                                        \
-    asm volatile(".syntax unified        \n\t"                                \
-                 "push  {lr}             \n\t" /*save lr on MAIN stack*/      \
-                 "mrs   r1,  psp         \n\t" /*get PROCESS stack pointer*/  \
-                 "ldr   r0,  =ctxsave    \n\t" /*get current context*/        \
-                 "ldr   r0,  [r0]        \n\t"                                \
-                 "stmia r0!, {r1,r4-r7}  \n\t" /*save PROCESS sp + r4-r7*/    \
-                 "mov   r4,  r8          \n\t"                                \
-                 "mov   r5,  r9          \n\t"                                \
-                 "mov   r6,  r10         \n\t"                                \
-                 "mov   r7,  r11         \n\t"                                \
-                 "stmia r0!, {r4-r7}     \n\t"                                \
-                 "dmb                    \n\t"                                \
+#define saveContext()                                                         \
+    asm volatile("   mrs    r1,  psp            \n"/*get PROCESS stack ptr  */ \
+                 "   ldr    r3,  =ctxsave       \n"/*get current context    */ \
+                 "   ldr    r0,  [r3]           \n"                            \
+                 "   stmia  r0!, {r1,r4-r11,lr} \n"/*save r1(psp),r4-r11,lr */ \
+                 "   lsls   r2,  lr,  #27       \n"/*check if bit #4 is set */ \
+                 "   bmi    0f                  \n"                            \
+                 "   vstmia.32 r0, {s16-s31}    \n"/*save s16-s31 if we need*/ \
+                 "0: mov    r4,  r3             \n"/*save for restoreContext*/ \
+                 "   dmb                        \n"                            \
                  );
 
 /**
@@ -91,21 +97,38 @@
  * of an IRQ where a context switch can happen. The IRQ must be "naked" to
  * prevent the compiler from generating context restore.
  */
-#define restoreContext()                                                     \
-    asm volatile(".syntax unified        \n\t"                                \
-                 "ldr   r0,  =ctxsave    \n\t" /*get current context*/        \
-                 "ldr   r0,  [r0]        \n\t"                                \
-                 "ldmia r0!, {r1,r4-r7}  \n\t" /*pop r8-r11 saving in r4-r7*/ \
-                 "msr   psp, r1          \n\t" /*restore PROCESS sp*/         \
-                 "ldmia r0,  {r0-r3}     \n\t"                                \
-                 "mov   r8,  r0          \n\t"                                \
-                 "mov   r9,  r1          \n\t"                                \
-                 "mov   r10, r2          \n\t"                                \
-                 "mov   r11, r3          \n\t"                                \
-                 "pop   {pc}             \n\t" /*return*/                     \
+#define restoreContext()                                                      \
+    asm volatile("   ldr    r0,  [r4]           \n"/*get current context    */ \
+                 "   ldmia  r0!, {r1,r4-r11,lr} \n"/*load r1(psp),r4-r11,lr */ \
+                 "   lsls   r2,  lr,  #27       \n"/*check if bit #4 is set */ \
+                 "   bmi    0f                  \n"                            \
+                 "   vldmia.32 r0, {s16-s31}    \n"/*restore s16-s31 if need*/ \
+                 "0: ldr    r0,  [r0, #64]      \n"/*get psplim*/              \
+                 "   msr    psplim, r0          \n"/*update PROCESS sp limit*/ \
+                 "   msr    psp, r1             \n"/*restore PROCESS sp*/      \
+                 "   bx     lr                  \n"/*return*/                  \
                  );
 
-#elif defined(_CHIP_RP2040)
+#else //__FPU_PRESENT==1
+
+/*
+ * In this architecture, registers are saved in the following order:
+ * *ctxsave+36 --> psplim
+ * *ctxsave+32 --> r11
+ * *ctxsave+28 --> r10
+ * *ctxsave+24 --> r9
+ * *ctxsave+20 --> r8
+ * *ctxsave+16 --> r7
+ * *ctxsave+12 --> r6
+ * *ctxsave+8  --> r5
+ * *ctxsave+4  --> r4
+ * *ctxsave+0  --> psp
+ *
+ * NOTE: we could save the lr (EXC_RETURN) in ctxsave instead of the IRQ stack
+ * to save one instruction (the stmdb sp!, {lr} in saveContext), but that would
+ * increase every ctxsave array by 4 bytes and would actually be slower on MCUs
+ * with external RAM, as in that case the IRQ stack is faster
+ */
 
 /**
  * \internal
@@ -124,21 +147,11 @@
  * running on the stm32f429zi_stm32f4discovery.
  */
 #define saveContext()                                                        \
-    asm volatile(".syntax unified        \n\t"                                \
-                 "push  {lr}             \n\t" /*save lr on MAIN stack*/      \
+    asm volatile("stmdb sp!, {lr}        \n\t" /*save lr on MAIN stack*/      \
                  "mrs   r1,  psp         \n\t" /*get PROCESS stack pointer*/  \
-                 "ldr   r2,  =0xd0000000 \n\t" /* CPUID */                    \
-                 "ldr   r2,  [r2]        \n\t"                                \
-                 "lsls  r2,  #2          \n\r"                                \
                  "ldr   r3,  =ctxsave    \n\t" /*get current context*/        \
-                 "adds  r3,  r3,  r2     \n\t"                                \
                  "ldr   r0,  [r3]        \n\t"                                \
-                 "stmia r0!, {r1,r4-r7}  \n\t" /*save PROCESS sp + r4-r7*/    \
-                 "mov   r4,  r8          \n\t"                                \
-                 "mov   r5,  r9          \n\t"                                \
-                 "mov   r6,  r10         \n\t"                                \
-                 "mov   r7,  r11         \n\t"                                \
-                 "stmia r0!, {r4-r7}     \n\t"                                \
+                 "stmia r0,  {r1,r4-r11} \n\t" /*save PROCESS sp + r4-r11*/   \
                  "mov   r4,  r3          \n\t" /*save for restoreContext*/    \
                  "dmb                    \n\t"                                \
                  );
@@ -150,21 +163,15 @@
  * prevent the compiler from generating context restore.
  */
 #define restoreContext()                                                     \
-    asm volatile(".syntax unified        \n\t"                                \
-                 "ldr   r0,  [r4]        \n\t" /*get current context*/        \
-                 "ldmia r0!, {r1,r4-r7}  \n\t" /*pop r8-r11 saving in r4-r7*/ \
+    asm volatile("ldr   r0,  [r4]        \n\t" /*get current context*/        \
+                 "ldmia r0!, {r1,r4-r11} \n\t" /*restore r4-r11 + r1=psp*/    \
+                 "ldr   r0,  [r0]        \n\t" /*get psplim*/                 \
+                 "msr   psplim, r0       \n\t" /*update PROCESS sp limit*/    \
                  "msr   psp, r1          \n\t" /*restore PROCESS sp*/         \
-                 "ldmia r0,  {r0-r3}     \n\t"                                \
-                 "mov   r8,  r0          \n\t"                                \
-                 "mov   r9,  r1          \n\t"                                \
-                 "mov   r10, r2          \n\t"                                \
-                 "mov   r11, r3          \n\t"                                \
-                 "pop   {pc}             \n\t" /*return*/                     \
+                 "ldmia sp!, {pc}        \n\t" /*return*/                     \
                  );
 
-#else
-#error "No context switch code for this SMP architecture"
-#endif
+#endif //__FPU_PRESENT==1
 
 namespace miosix {
 
@@ -175,7 +182,7 @@ inline void IRQinvokeScheduler() noexcept
     //Can't use NVIC_SetPendingIRQ as PendSV is an exception, not an IRQ
     SCB->ICSR=SCB_ICSR_PENDSVSET_Msk;
     //NOTE: due to the write buffer while doing the store to the SCB->ICSR,
-    //the CPU could execute ahead of the yield. Use dmb to prevent
+    //the CPU could execute ahead of the yield. Use dsb to prevent
     //NOTE: a dmb is NOT enough, as the code pattern using this function can be:
     // str     r2, [r3, #4] //SCB->ICSR=SCB_ICSR_PENDSVSET_Msk;
     // dmb     sy
@@ -183,7 +190,7 @@ inline void IRQinvokeScheduler() noexcept
     // cpsid   i
     // and it's important that the store to set PENDSVSET is seen in the cycle
     // when interrupts are enabled. However since cpsi* instruction do not read
-    // from memory a dmb can still allow the store to be delayed. This isssue
+    // from memory a dmb can still allow the store to be delayed. This issue
     // was first seen in CortexM33
     asm volatile("dsb":::"memory");
 }

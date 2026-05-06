@@ -31,6 +31,7 @@
 #include "sync.h"
 #include "boot.h"
 #include "process.h"
+#include "stackcheck.h"
 #include "scheduler/scheduler.h"
 #include "sched_data_structures.h"
 #include "kercalls/libc_integration.h"
@@ -740,34 +741,12 @@ int Thread::getStackSize()
     return getCurrentThread()->stacksize;
 }
 
-void Thread::IRQstackOverflowCheck()
-{
-    Thread *cur=const_cast<Thread*>(runningThreads[getCurrentCoreId()]);
-    const unsigned int watermarkSize=WATERMARK_LEN/sizeof(unsigned int);
-    #ifdef WITH_PROCESSES
-    if(cur->flags.isInUserspace())
-    {
-        bool overflow=false;
-        if(cur->userCtxsave[STACK_OFFSET_IN_CTXSAVE] <
-            reinterpret_cast<unsigned int>(cur->userWatermark+watermarkSize))
-            overflow=true;
-        if(overflow==false)
-            for(unsigned int i=0;i<watermarkSize;i++)
-                if(cur->userWatermark[i]!=WATERMARK_FILL) overflow=true;
-        if(overflow) IRQreportFault(FaultData(fault::STACKOVERFLOW));
-    }
-    #endif //WITH_PROCESSES
-    if(cur->ctxsave[STACK_OFFSET_IN_CTXSAVE] <
-        reinterpret_cast<unsigned int>(cur->watermark+watermarkSize))
-        errorHandler(Error::STACK_OVERFLOW);
-    for(unsigned int i=0;i<watermarkSize;i++)
-        if(cur->watermark[i]!=WATERMARK_FILL) errorHandler(Error::STACK_OVERFLOW);
-}
-
 #ifdef WITH_PROCESSES
 
 void Thread::IRQhandleSvc()
 {
+    FastGlobalLockFromIrq lock;
+    IRQstackOverflowCheck();
     int coreId=getCurrentCoreId();
     Thread *cur=const_cast<Thread*>(runningThreads[coreId]);
     if(cur->proc==kernelProcess) errorHandler(Error::UNEXPECTED);
@@ -949,7 +928,7 @@ Thread *Thread::doCreate(void*(*startfunc)(void*), unsigned int stacksize,
     //On some architectures some registers are saved on the stack, therefore
     //initKernelThreadCtxsave *must* be called after filling the stack.
     initKernelThreadCtxsave(thread->ctxsave,&Thread::threadLauncher,
-                            reinterpret_cast<unsigned int*>(thread),
+                            reinterpret_cast<unsigned int*>(thread),base,
                             startfunc,argv);
 
     if(options & DETACHED) thread->flags.IRQsetDetached();

@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2026 by Terraneo Federico                               *
+ *   Copyright (C) 2008-2026 by Terraneo Federico                          *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
@@ -32,34 +32,56 @@
 #error "If your code depends on a private header, it IS broken."
 #endif //COMPILING_MIOSIX
 
-/**
- * \addtogroup Interfaces
- * \{
- */
-
-/**
- * \file mpu.h
- * This file allows the kernel to configure a Memory Protection Unit to enforce
- * kernel-level W^X memory protection.
- * On some architectures such as ARM, the MPU is also used to configure
- * cacheability.
- * The implementation of this interface should cooperate with the dynamic MPU
- * configuration needed to implement processes that is instead declared in
- * userspace.h
- */
+#include "interfaces/arch_registers.h" //For __CORTEX_M
+#include "interfaces_private/userspace.h"
+#include "thread.h"
 
 namespace miosix {
 
+//These are defined in thread.cpp
+extern volatile Thread *runningThreads[CPU_NUM_CORES];
+
 /**
  * \internal
- * The kernel calls this function in boot.cpp to enable the MPU, if present
+ * To be used in interrupts where a context switch can occur to check if the
+ * stack of the thread being preempted has overflowed.
+ * Note that since Miosix 3 all peripheral interrupts no longer perform a
+ * full context save/restore thus you cannot call this functions from such
+ * interrupts.
+ *
+ * If the overflow check failed for a kernel thread or a thread running in
+ * kernelspace this function causes a reboot. On a platform with processes
+ * this function calls IRQreportFault() if the stack overflow happened in
+ * userspace, causing the process to segfault.
  */
-void IRQenableMPU();
+inline void IRQstackOverflowCheck()
+{
+    //CortexM33 has hardware stackoverflow checking, no need to check in software
+    #if !defined(__CORTEX_M) || __CORTEX_M != 33U
+    Thread *cur=const_cast<Thread*>(runningThreads[getCurrentCoreId()]);
+    const unsigned int watermarkSize=WATERMARK_LEN/sizeof(unsigned int);
+    #ifdef WITH_PROCESSES
+    if(cur->flags.isInUserspace())
+    {
+        bool overflow=false;
+        if(cur->userCtxsave[STACK_OFFSET_IN_CTXSAVE] <
+            reinterpret_cast<unsigned int>(cur->userWatermark+watermarkSize)) [[unlikely]]
+            overflow=true;
+        if(overflow==false) [[likely]]
+            for(unsigned int i=0;i<watermarkSize;i++)
+                if(cur->userWatermark[i]!=WATERMARK_FILL) [[unlikely]]
+                    overflow=true;
+        if(overflow) [[unlikely]]
+            Thread::IRQreportFault(FaultData(fault::STACKOVERFLOW));
+    }
+    #endif //WITH_PROCESSES
+    if(cur->ctxsave[STACK_OFFSET_IN_CTXSAVE] <
+        reinterpret_cast<unsigned int>(cur->watermark+watermarkSize)) [[unlikely]]
+        errorHandler(Error::STACK_OVERFLOW);
+    for(unsigned int i=0;i<watermarkSize;i++)
+        if(cur->watermark[i]!=WATERMARK_FILL) [[unlikely]]
+            errorHandler(Error::STACK_OVERFLOW);
+    #endif //!defined(__CORTEX_M) || __CORTEX_M != 33U
+}
 
 } //namespace miosix
-
-/**
- * \}
- */
-
-#include "interfaces-impl/mpu_impl.h"

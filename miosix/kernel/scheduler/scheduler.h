@@ -38,6 +38,7 @@
 #include "kernel/scheduler/edf/edf_scheduler.h"
 #include "kernel/lock.h"
 #include "kernel/cpu_time_counter.h"
+#include "kernel/stackcheck.h"
 #include "interfaces_private/os_timer.h"
 
 namespace miosix {
@@ -185,18 +186,13 @@ public:
      * It finds the next thread in READY status. If the kernel is paused,
      * does nothing. It's behaviour is to modify the global variable
      * miosix::runningThread which always points to the currently running thread.
+     *
+     * The implementation of this function takes the FastGlobalLockFromIrq
+     * so you must not take the lock before calling this function
      */
     static void IRQrunScheduler() noexcept
     {
-        //If kernel is paused, preemption is disabled
-        #ifdef WITH_SMP
-        auto coreId=getCurrentCoreId();
-        if(FastPauseKernelLock::holdingCore==coreId) FastPauseKernelLock::pendingWakeup=true;
-        else T::IRQrunScheduler(coreId);
-        #else
-        if(FastPauseKernelLock::holdingCore==0) FastPauseKernelLock::pendingWakeup=true;
-        else T::IRQrunScheduler();
-        #endif
+        T::IRQrunScheduler();
     }
 
     /**

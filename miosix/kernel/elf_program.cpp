@@ -157,10 +157,7 @@ int ProgramCache::load(const char *name, const unsigned int *& elf,
         return 0;
     }
     //Not found, load program in cache
-    //Seek to the end to get file size, then seek back to the start
-    off_t fileSize=file->lseek(0,SEEK_END);
-    off_t error=file->lseek(0,SEEK_SET);
-    if(fileSize<0 || error!=0) return -EFAULT;
+    off_t fileSize=s.st_size;
     //File sizes can be 64 bit, but executable files can't
     if(fileSize & 0xffffffff00000000ull) return -ENOMEM;
     //Allocate a RAM block in the process pool
@@ -356,6 +353,10 @@ void ElfProgram::validateHeader()
         }
     }
     if(codeSegmentPresent==false) return; //Can't not have code segment
+    // We could support programs without data segment but ProcessImage::load
+    // doesn't handle this case. Since libsyscalls causes a data segment to be
+    // present even with an empty main, we just reject programs with no data
+    if(dataSegmentPresent==false) return;
     // All checks passed setting error code to 0
     ec=0;
 }
@@ -536,6 +537,7 @@ void ProcessImage::load(const ElfProgram& program)
                         case DT_MX_RAMSIZE:
                             tie(image,size)=ProcessPool::instance()
                                     .allocate(dyn->d_un.d_val);
+                            break;
                         case DT_MX_STACKSIZE:
                             mainStackSize=dyn->d_un.d_val;
                             break;

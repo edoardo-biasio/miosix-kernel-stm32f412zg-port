@@ -464,6 +464,11 @@ void __attribute__((naked)) Reset_Handler()
      * After switching stack we continue boot by calling
      * miosix::IRQkernelBootEntryPoint()
      */
+    #if __CORTEX_M == 33
+    //ARMv8M supports hardware stack overflow checking, configure IRQ stack limit
+    asm volatile("ldr r0,  =_irq_stack_bottom             \n\t"
+                 "msr msplim, r0                          \n\t");
+    #endif
     asm volatile("cpsid i                                 \n\t" //Disable interrupts
                  "bl  _ZN6miosix21IRQmemoryAndClockInitEv \n\t" //Initialize PLL,FLASH,XRAM
                  "ldr r0,  =_heap_end                     \n\t" //Get pointer to heap end
@@ -725,29 +730,31 @@ void DebugMon_Handler()
 void __attribute__((naked)) SVC_Handler()
 {
     saveContext();
-    asm volatile("bl _ZN6miosix7svcImplEv");
-    restoreContext();
-}
-
-void __attribute__((noinline)) svcImpl()
-{
-    FastGlobalLockFromIrq lock;
     #if __CORTEX_M != 0
     //If there are higher-priority faults pending, do not process the SVC, as
     //they must have been caused during register saving. If that wasn't the
     //case, they would have triggered before the SVC.
     //This does not happen on armv6-m (Cortex-M0) because HardFault is the only
     //possible exception triggerable by a context save and that has a hardcoded
-    //higher priority and will run preempt and run first no matter what.
-    //If we do not exit now, IRQstackOverflowCheck or IRQhandleSvc may switch
-    //from userspace into kernelspace, causing these faults to be attributed to
-    //the kernel rather than the process.
-    if(SCB->SHCSR & (SCB_SHCSR_BUSFAULTPENDED_Msk
-                   | SCB_SHCSR_MEMFAULTPENDED_Msk
-                   | SCB_SHCSR_USGFAULTPENDED_Msk)) return;
+    //higher priority and will preempt and run first no matter what.
+    //If we do not exit now IRQhandleSvc may switch from userspace into
+    //kernelspace, causing these faults to be attributed to the kernel rather
+    //than the process.
+    //Here we would like to write the following code
+    //if((SCB->SHCSR & (SCB_SHCSR_BUSFAULTPENDED_Msk
+    //               | SCB_SHCSR_MEMFAULTPENDED_Msk
+    //               | SCB_SHCSR_USGFAULTPENDED_Msk))==0) Thread::IRQhandleSvc();
+    //but we we're trying to avoid to call an intermediate C++ function
+    asm volatile("   ldr  r0, =0xe000ed00 \n" // SCB
+                 "   ldr  r0, [r0, #36]   \n" // SCB->SHCSR
+                 "   tst  r0, #28672      \n" //BUSFAULTPENDED | MEMFAULTPENDED | USGFAULTPENDED
+                 "   bne  0f              \n"
+                 "   bl _ZN6miosix6Thread12IRQhandleSvcEv \n"
+                 "0:                      \n");
+    #else
+    asm volatile("bl _ZN6miosix6Thread12IRQhandleSvcEv");
     #endif
-    Thread::IRQstackOverflowCheck();
-    Thread::IRQhandleSvc();
+    restoreContext();
 }
 #else //WITH_PROCESSES
 void SVC_Handler()
@@ -760,20 +767,6 @@ void SVC_Handler()
     IRQsystemReboot();
 }
 #endif //WITH_PROCESSES
-
-/**
- * \internal
- * Called by the PendSV interrupt, call the scheduler to yield to next thread
- * Declared noinline to avoid the compiler trying to inline it into the caller,
- * which would violate the requirement on naked functions. Function is not
- * static because otherwise the compiler optimizes it out...
- */
-void __attribute__((noinline)) pendsvImpl()
-{
-    FastGlobalLockFromIrq lock;
-    Thread::IRQstackOverflowCheck();
-    Scheduler::IRQrunScheduler();
-}
 
 void __attribute__((naked)) PendSV_Handler()
 {
@@ -796,7 +789,18 @@ void __attribute__((naked)) PendSV_Handler()
     //Since we are forced to perform the function call in assembly, we need to
     //call the C++ mangled name of pendsvImpl()
     saveContext();
-    asm volatile("bl _ZN6miosix10pendsvImplEv");
+    //We would like to call Scheduler::IRQrunScheduler() which will select
+    //at compile-time which scheduler to run, but this can't be done froma naked
+    //function and we're trying to avoid to call an intermediate C++ function
+    #if defined(SCHED_TYPE_PRIORITY)
+    asm volatile("bl _ZN6miosix17PriorityScheduler15IRQrunSchedulerEv");
+    #elif defined(SCHED_TYPE_CONTROL_BASED)
+    asm volatile("bl _ZN6miosix16ControlScheduler15IRQrunSchedulerEv");
+    #elif defined(SCHED_TYPE_EDF)
+    asm volatile("bl _ZN6miosix12EDFScheduler15IRQrunSchedulerEv");
+    #else
+    #error No scheduler selected in miosix_settings.h
+    #endif
     restoreContext();
 }
 
